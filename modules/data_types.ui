@@ -158,6 +158,44 @@
        </item>
       </layout>
      </widget>
+     <widget class="QWidget" name="tab_construct">
+      <attribute name="title">
+       <string>Construct</string>
+      </attribute>
+      <layout class="QVBoxLayout" name="verticalLayout">
+       <item>
+        <widget class="QTextEdit" name="txtConstruct">
+        </widget>
+       </item>
+       <item>
+        <widget class="QCommandLinkButton" name="btnLoadConstruct">
+         <property name="enabled">
+          <bool>true</bool>
+         </property>
+         <property name="text">
+          <string>Load construct</string>
+         </property>
+         </widget>
+       </item>
+       <item>
+        <widget class="QCommandLinkButton" name="btnApplyConstruct">
+         <property name="enabled">
+          <bool>true</bool>
+         </property>
+         <property name="text">
+          <string>Apply</string>
+         </property>
+         </widget>
+       </item>
+       <item>
+        <widget class="QLabel" name="label_construct_filename">
+         <property name="text">
+          <string>No construct script selected</string>
+         </property>
+        </widget>
+       </item>
+      </layout>
+     </widget>
      <widget class="QWidget" name="tab_dates">
       <attribute name="title">
        <string>Dates</string>
@@ -194,10 +232,7 @@
       </widget>
      </item>
      <item>
-      <widget class="QLineEdit" name="hexEdit">
-       <property name="alignment">
-        <set>Qt::AlignRight|Qt::AlignTrailing|Qt::AlignVCenter</set>
-       </property>
+      <widget class="QPlainTextEdit" name="hexEdit">
       </widget>
      </item>
     </layout>
