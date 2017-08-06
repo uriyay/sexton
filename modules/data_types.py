@@ -9,6 +9,7 @@ import struct
 import time
 from collections import OrderedDict
 import pprint
+import imp
 
 from PySide import QtUiTools
 from PySide.QtCore import *
@@ -182,15 +183,68 @@ class DataTypes(QMainWindow):
                     bytes_or_view = bytes_or_view[:size_needed].tobytes()
                 try:
                     assert(size_needed == len(bytes_or_view))
-                    parsed_struct = self.main_struct.parse(bytes_or_view)
-                    struct_dict = OrderedDict(parsed_struct.iteritems())
-                    self.ui.txtConstruct.setText(pprint.pformat(struct_dict, indent=4))
+                    self.parsed_struct = self.main_struct.parse(bytes_or_view)
+                    self.ui.lstConstruct.clear()
+                    self._dump_container_to_list(self.parsed_struct)
                     if not is_hexEdit_changer:
                         self.set_hexEdit_bytes(bytes_or_view)
                 except:
-                    print 'needed %d while only %d bytes supplied' % (size_needed, len(bytes_or_view))
-                    self.ui.txtConstruct.setText("n/a")
+                    self.ui.lstConstruct.clear()
 
+    def _dump_container_to_list(self, dict_obj, tabs=0, path=None):
+        if path is None:
+            path = ''
+
+        for key,value in dict_obj.items():
+            value_path = '%s.%s' % (path, key)
+            if type(value) is Container:
+                item = QListWidgetItem()
+                item.setText('{}{}:'.format('\t'*tabs, repr(key)))
+                self.ui.lstConstruct.addItem(item)
+                self._dump_container_to_list(value, tabs+1, value_path)
+            else:
+                value_string = '{}{}: {}'.format('\t' * tabs,
+                        repr(key),
+                        repr(value))
+                item = QListWidgetItem()
+                item.setText(value_string)
+                item.setToolTip(value_path)
+                self.ui.lstConstruct.addItem(item)
+
+    def _get_from_dict(self, dict_obj, keys_list):
+        return reduce(operator.getitem, keys_list, dict_obj)
+
+    def _offsetOf(self, struct, container, path):
+        if type(struct) is not Renamed:
+            struct = Renamed('struct', struct)
+        offset = 0
+        for key,value in container.items():
+            if key == path[0]:
+                #increment the path
+                path = path[1:]
+                if not path:
+                    return offset
+                subcon = [x for x in struct.subcon.subcons if x.name == key][0]
+                return offset + self._offsetOf(subcon, value, path)
+            else:
+                subcon = [x for x in struct.subcon.subcons if x.name == key][0]
+                offset += subcon.sizeof()
+
+    def _sizeOf(self, struct, container, path):
+        if type(struct) is not Renamed:
+            struct = Renamed('struct', struct)
+        offset = 0
+        for key,value in container.items():
+            if key == path[0]:
+                #increment the path
+                path = path[1:]
+                subcon = [x for x in struct.subcon.subcons if x.name == key][0]
+                if not path:
+                    return offset + subcon.sizeof()
+                return offset + self._sizeOf(subcon, value, path)
+            else:
+                subcon = [x for x in struct.subcon.subcons if x.name == key][0]
+                offset += subcon.sizeof()
 
     def update(self):
         if not self.view:
@@ -342,17 +396,31 @@ class DataTypes(QMainWindow):
                                                         file_filter)
         self.ui.label_construct_filename.setText(file_name + ' - loading..')
         #parse construct
-        script = open(file_name, 'rb').read()
-        self.main_struct = eval(script)
+        module = imp.load_source('module', file_name)
+        self.main_struct = module.main_struct
         self.ui.label_construct_filename.setText(file_name + ' - loading succeeded!')
         self.update()
 
     @Slot()
     @exception_handler
     def on_btnApplyConstruct_clicked(self):
-        struct_dict = eval(self.ui.txtConstruct.toPlainText())
+        struct_dict = eval(self.ui.lstConstruct.toPlainText())
         #rebuild struct
         data = self.main_struct.build(struct_dict)
         self.set_hexEdit_bytes(data)
         #apply change
         self.on_changeButton_clicked()
+
+    @Slot()
+    @exception_handler
+    def on_lstConstruct_itemSelectionChanged(self):
+        #get the offset from the struct
+        current_item = self.ui.lstConstruct.currentItem()
+        item_tooltip = current_item.toolTip()
+        if item_tooltip:
+            path = item_tooltip.split('.')[1:]
+            offset = self._offsetOf(self.main_struct, self.parsed_struct, path)
+            size = self._sizeOf(self.main_struct, self.parsed_struct, path)
+            #highlight in the hexeditor
+            cursor = self.view.get_cursor_position()
+            self.view.set_selection(cursor + offset, cursor + offset + size)

@@ -164,7 +164,7 @@
       </attribute>
       <layout class="QVBoxLayout" name="verticalLayout">
        <item>
-        <widget class="QTextEdit" name="txtConstruct">
+        <widget class="QListWidget" name="lstConstruct">
         </widget>
        </item>
        <item>
