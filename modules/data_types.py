@@ -10,6 +10,8 @@ import time
 from collections import OrderedDict
 import pprint
 import imp
+import operator
+from ast import literal_eval
 
 from PySide import QtUiTools
 from PySide.QtCore import *
@@ -184,7 +186,6 @@ class DataTypes(QMainWindow):
                 try:
                     assert(size_needed == len(bytes_or_view))
                     self.parsed_struct = self.main_struct.parse(bytes_or_view)
-                    self.ui.lstConstruct.clear()
                     self._dump_container_to_list(self.parsed_struct)
                     if not is_hexEdit_changer:
                         self.set_hexEdit_bytes(bytes_or_view)
@@ -193,6 +194,7 @@ class DataTypes(QMainWindow):
 
     def _dump_container_to_list(self, dict_obj, tabs=0, path=None):
         if path is None:
+            self.ui.lstConstruct.clear()
             path = ''
 
         for key,value in dict_obj.items():
@@ -214,6 +216,11 @@ class DataTypes(QMainWindow):
     def _get_from_dict(self, dict_obj, keys_list):
         return reduce(operator.getitem, keys_list, dict_obj)
 
+    def _set_dict_value(self, dict_obj, keys_list, value):
+        operator.setitem(self._get_from_dict(dict_obj, keys_list[:-1]), #get the lowest dict object
+                         keys_list[-1], #pass the lowest key (which leads to a value)
+                         value)
+
     def _offsetOf(self, struct, container, path):
         if type(struct) is not Renamed:
             struct = Renamed('struct', struct)
@@ -233,18 +240,16 @@ class DataTypes(QMainWindow):
     def _sizeOf(self, struct, container, path):
         if type(struct) is not Renamed:
             struct = Renamed('struct', struct)
-        offset = 0
         for key,value in container.items():
             if key == path[0]:
                 #increment the path
                 path = path[1:]
                 subcon = [x for x in struct.subcon.subcons if x.name == key][0]
                 if not path:
-                    return offset + subcon.sizeof()
-                return offset + self._sizeOf(subcon, value, path)
+                    return subcon.sizeof()
+                return self._sizeOf(subcon, value, path)
             else:
                 subcon = [x for x in struct.subcon.subcons if x.name == key][0]
-                offset += subcon.sizeof()
 
     def update(self):
         if not self.view:
@@ -404,9 +409,7 @@ class DataTypes(QMainWindow):
     @Slot()
     @exception_handler
     def on_btnApplyConstruct_clicked(self):
-        struct_dict = eval(self.ui.lstConstruct.toPlainText())
-        #rebuild struct
-        data = self.main_struct.build(struct_dict)
+        data = self.main_struct.build(self.parsed_struct)
         self.set_hexEdit_bytes(data)
         #apply change
         self.on_changeButton_clicked()
@@ -424,3 +427,48 @@ class DataTypes(QMainWindow):
             #highlight in the hexeditor
             cursor = self.view.get_cursor_position()
             self.view.set_selection(cursor + offset, cursor + offset + size)
+
+    @Slot()
+    @exception_handler
+    def on_lstConstruct_itemActivated(self):
+        '''
+        This event happens when the user double click on item in the list or press Enter
+        '''
+        #get field value
+        current_item = self.ui.lstConstruct.currentItem()
+        item_tooltip = current_item.toolTip()
+        field_name = item_tooltip
+        path = field_name.split('.')[1:]
+        struct_dict = OrderedDict(self.parsed_struct.items())
+        field_value = self._get_from_dict(struct_dict, path)
+        field_size = self._sizeOf(self.main_struct, self.parsed_struct, path)
+        #field type is actually string or int/long
+        if type(field_value) is str:
+            #display as a string
+            field_value = repr(field_value)
+        elif type(field_value) in (int,long):
+            field_value = '0x%x' % (field_value,)
+        else:
+            raise Exception('Unknown field type for %s' % (path,))
+
+        #open dialog box
+        value,is_confirmed = QInputDialog.getText(self,
+                'Change value',
+                'Enter new integer value for %s (%d bytes)' % (field_name, field_size),
+                text=field_value)
+        if not is_confirmed:
+            return
+
+        #parse the value
+        value = literal_eval(value)
+        #change the value in the dict
+        self._set_dict_value(struct_dict, path, value)
+        #try to rebuild the struct, this might throw exception that will be displayed in message box
+        parsed_struct = Container(struct_dict)
+        data = self.main_struct.build(parsed_struct)
+        #change self.parsed_struct after we succeded to rebuild the main_struct with it
+        self.parsed_struct = parsed_struct
+        #change also in lstConstruct
+        self._dump_container_to_list(self.parsed_struct)
+        #and the hexEdit
+        self.set_hexEdit_bytes(data)
