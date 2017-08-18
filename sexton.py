@@ -267,6 +267,7 @@ class HexView(QtGui.QWidget):
 					selected = False
 					if i == self.cursor_column and line == self.cursor_line:
 						# We are at the data cursor.
+						print i, 'is selected'
 						selected = True
 					elif self.selection_start <= global_offset and \
 					                             global_offset < self.selection_end:
