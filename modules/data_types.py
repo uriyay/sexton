@@ -19,6 +19,7 @@ from PySide.QtGui import *
 
 from Petter.guihelper import exception_handler
 
+from modules.construct_helper import get_offset_of, get_size_of, get_from_dict, set_dict_value
 from construct import *
 
 class DataTypes(QMainWindow):
@@ -179,18 +180,16 @@ class DataTypes(QMainWindow):
 
         elif current_tab == self.ui.tab_construct:
             #parse data with self.main_struct.parse() and str() it to the text box
-            if self.main_struct:
-                size_needed = self.main_struct.sizeof()
-                if isinstance(bytes_or_view, memoryview):
-                    bytes_or_view = bytes_or_view[:size_needed].tobytes()
-                try:
-                    assert(size_needed == len(bytes_or_view))
-                    self.parsed_struct = self.main_struct.parse(bytes_or_view)
-                    self._dump_container_to_list(self.parsed_struct)
-                    if not is_hexEdit_changer:
-                        self.set_hexEdit_bytes(bytes_or_view)
-                except:
-                    self.ui.lstConstruct.clear()
+            if isinstance(bytes_or_view, memoryview):
+                bytes_or_view = bytes_or_view.tobytes()
+            try:
+                #Its useless to check the size, since there can be dynamic size
+                self.parsed_struct = self.main_struct.parse(bytes_or_view)
+                self._dump_container_to_list(self.parsed_struct)
+                if not is_hexEdit_changer:
+                    self.set_hexEdit_bytes(bytes_or_view)
+            except:
+                self.ui.lstConstruct.clear()
 
     def _dump_container_to_list(self, dict_obj, tabs=0, path=None):
         if path is None:
@@ -202,8 +201,17 @@ class DataTypes(QMainWindow):
             if type(value) is Container:
                 item = QListWidgetItem()
                 item.setText('{}{}:'.format('\t'*tabs, repr(key)))
+                item.setToolTip(value_path)
                 self.ui.lstConstruct.addItem(item)
                 self._dump_container_to_list(value, tabs+1, value_path)
+            elif type(value) is ListContainer:
+                for index, field in enumerate(value):
+                    item = QListWidgetItem()
+                    field_path = value_path + '.[%d]' % (index,)
+                    item.setText('{}{}:'.format('\t'*tabs, repr(key) + '[%d]' % (index,)))
+                    item.setToolTip(field_path)
+                    self.ui.lstConstruct.addItem(item)
+                    self._dump_container_to_list(field, tabs+1, field_path)
             else:
                 value_string = '{}{}: {}'.format('\t' * tabs,
                         repr(key),
@@ -212,44 +220,6 @@ class DataTypes(QMainWindow):
                 item.setText(value_string)
                 item.setToolTip(value_path)
                 self.ui.lstConstruct.addItem(item)
-
-    def _get_from_dict(self, dict_obj, keys_list):
-        return reduce(operator.getitem, keys_list, dict_obj)
-
-    def _set_dict_value(self, dict_obj, keys_list, value):
-        operator.setitem(self._get_from_dict(dict_obj, keys_list[:-1]), #get the lowest dict object
-                         keys_list[-1], #pass the lowest key (which leads to a value)
-                         value)
-
-    def _offsetOf(self, struct, container, path):
-        if type(struct) is not Renamed:
-            struct = Renamed('struct', struct)
-        offset = 0
-        for key,value in container.items():
-            if key == path[0]:
-                #increment the path
-                path = path[1:]
-                if not path:
-                    return offset
-                subcon = [x for x in struct.subcon.subcons if x.name == key][0]
-                return offset + self._offsetOf(subcon, value, path)
-            else:
-                subcon = [x for x in struct.subcon.subcons if x.name == key][0]
-                offset += subcon.sizeof()
-
-    def _sizeOf(self, struct, container, path):
-        if type(struct) is not Renamed:
-            struct = Renamed('struct', struct)
-        for key,value in container.items():
-            if key == path[0]:
-                #increment the path
-                path = path[1:]
-                subcon = [x for x in struct.subcon.subcons if x.name == key][0]
-                if not path:
-                    return subcon.sizeof()
-                return self._sizeOf(subcon, value, path)
-            else:
-                subcon = [x for x in struct.subcon.subcons if x.name == key][0]
 
     def update(self):
         if not self.view:
@@ -422,8 +392,8 @@ class DataTypes(QMainWindow):
         item_tooltip = current_item.toolTip()
         if item_tooltip:
             path = item_tooltip.split('.')[1:]
-            offset = self._offsetOf(self.main_struct, self.parsed_struct, path)
-            size = self._sizeOf(self.main_struct, self.parsed_struct, path)
+            offset = get_offset_of(self.main_struct, self.parsed_struct, path)
+            size = get_size_of(self.main_struct, self.parsed_struct, path)
             #highlight in the hexeditor
             cursor = self.view.get_cursor_position()
             self.view.set_selection(cursor + offset, cursor + offset + size)
@@ -440,8 +410,8 @@ class DataTypes(QMainWindow):
         field_name = item_tooltip
         path = field_name.split('.')[1:]
         struct_dict = OrderedDict(self.parsed_struct.items())
-        field_value = self._get_from_dict(struct_dict, path)
-        field_size = self._sizeOf(self.main_struct, self.parsed_struct, path)
+        field_value = get_from_dict(struct_dict, path)
+        field_size = get_size_of(self.main_struct, self.parsed_struct, path)
         #field type is actually string or int/long
         if type(field_value) is str:
             #display as a string
@@ -462,7 +432,7 @@ class DataTypes(QMainWindow):
         #parse the value
         value = literal_eval(value)
         #change the value in the dict
-        self._set_dict_value(struct_dict, path, value)
+        set_dict_value(struct_dict, path, value)
         #try to rebuild the struct, this might throw exception that will be displayed in message box
         parsed_struct = Container(struct_dict)
         data = self.main_struct.build(parsed_struct)
