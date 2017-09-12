@@ -5,6 +5,7 @@
 import binascii
 import datetime
 import os
+import sys
 import struct
 import time
 from collections import OrderedDict
@@ -19,8 +20,10 @@ from PySide.QtGui import *
 
 from Petter.guihelper import exception_handler
 
-from modules.construct_helper import get_offset_of, get_size_of, get_from_dict, set_dict_value
+from modules import construct_helper
+from modules import _010_template_helper
 from construct import *
+import pfp
 
 class DataTypes(QMainWindow):
     def __init__(self, main_window, company_name, software_name):
@@ -31,7 +34,10 @@ class DataTypes(QMainWindow):
                             Qt.WindowCloseButtonHint)
 
         self.main_window = main_window
+        self.parsed_struct = None
         self.main_struct = None
+        self.parsed_template = None
+        self.template_path = None
 
         # Set up UI
         loader = QtUiTools.QUiLoader()
@@ -183,13 +189,29 @@ class DataTypes(QMainWindow):
             if isinstance(bytes_or_view, memoryview):
                 bytes_or_view = bytes_or_view.tobytes()
             try:
-                #Its useless to check the size, since there can be dynamic size
-                self.parsed_struct = self.main_struct.parse(bytes_or_view)
-                self._dump_container_to_list(self.parsed_struct)
-                if not is_hexEdit_changer:
-                    self.set_hexEdit_bytes(bytes_or_view)
-            except:
+                if self.main_struct is not None:
+                    #Its useless to check the size, since there can be dynamic size
+                    self.parsed_struct = self.main_struct.parse(bytes_or_view)
+                    self._dump_container_to_list(self.parsed_struct)
+                    if not is_hexEdit_changer:
+                        self.set_hexEdit_bytes(bytes_or_view)
+            except Exception, err:
                 self.ui.lstConstruct.clear()
+                raise sys.exc_info()[1], None, sys.exc_info()[2]
+        elif current_tab == self.ui.tab_010_templates:
+            #parse data with self.main_struct.parse() and str() it to the text box
+            if isinstance(bytes_or_view, memoryview):
+                bytes_or_view = bytes_or_view.tobytes()
+            try:
+                if self.template_path is not None:
+                    #Its useless to check the size, since there can be dynamic size
+                    self.parsed_template = pfp.parse(data=bytes_or_view, template_file=self.template_path)
+                    self._dump_parsed_010_object_to_list(OrderedDict(self.parsed_template._pfp__children_map))
+                    if not is_hexEdit_changer:
+                        self.set_hexEdit_bytes(bytes_or_view)
+            except Exception, err:
+                self.ui.lst010Template.clear()
+                raise sys.exc_info()[1], None, sys.exc_info()[2]
 
     def _dump_container_to_list(self, dict_obj, tabs=0, path=None):
         if path is None:
@@ -220,6 +242,39 @@ class DataTypes(QMainWindow):
                 item.setText(value_string)
                 item.setToolTip(value_path)
                 self.ui.lstConstruct.addItem(item)
+
+
+    def _dump_parsed_010_object_to_list(self, dict_obj, tabs=0, path=None):
+        if path is None:
+            self.ui.lst010Template.clear()
+            path = ''
+
+        for key,value in dict_obj.items():
+            print 'value type is', type(value), 'key_name = ', key
+            value_path = '%s.%s' % (path, key)
+            if value.__class__.__base__ in (pfp.fields.Union, pfp.fields.Struct):
+                item = QListWidgetItem()
+                item.setText('{}{}:'.format('\t'*tabs, repr(key)))
+                item.setToolTip(value_path)
+                self.ui.lst010Template.addItem(item)
+                self._dump_parsed_010_object_to_list(OrderedDict(value._pfp__children_map), tabs+1, value_path)
+            elif value.__class__.__base__ is pfp.fields.Array:
+                for index, field in enumerate(value):
+                    item = QListWidgetItem()
+                    field_path = value_path + '.[%d]' % (index,)
+                    item.setText('{}{}:'.format('\t'*tabs, repr(key) + '[%d]' % (index,)))
+                    item.setToolTip(field_path)
+                    self.ui.lst010Template.addItem(item)
+                    if hasattr(field, '_pfp__children_map'):
+                        self._dump_parsed_010_object_to_list(OrderedDict(field._pfp__children_map), tabs+1, field_path)
+            else:
+                value_string = '{}{}: {}'.format('\t' * tabs,
+                        repr(key),
+                        value._pfp__value)
+                item = QListWidgetItem()
+                item.setText(value_string)
+                item.setToolTip(value_path)
+                self.ui.lst010Template.addItem(item)
 
     def update(self):
         if not self.view:
@@ -392,8 +447,8 @@ class DataTypes(QMainWindow):
         item_tooltip = current_item.toolTip()
         if item_tooltip:
             path = item_tooltip.split('.')[1:]
-            offset = get_offset_of(self.main_struct, self.parsed_struct, path)
-            size = get_size_of(self.main_struct, self.parsed_struct, path)
+            offset = construct_helper.get_offset_of(self.main_struct, self.parsed_struct, path)
+            size = construct_helper.get_size_of(self.main_struct, self.parsed_struct, path)
             #highlight in the hexeditor
             cursor = self.view.get_cursor_position()
             self.view.set_selection(cursor + offset, cursor + offset + size)
@@ -410,8 +465,8 @@ class DataTypes(QMainWindow):
         field_name = item_tooltip
         path = field_name.split('.')[1:]
         struct_dict = OrderedDict(self.parsed_struct.items())
-        field_value = get_from_dict(struct_dict, path)
-        field_size = get_size_of(self.main_struct, self.parsed_struct, path)
+        field_value = construct_helper.get_from_dict(struct_dict, path)
+        field_size = construct_helper.get_size_of(self.main_struct, self.parsed_struct, path)
         #field type is actually string or int/long
         if type(field_value) is str:
             #display as a string
@@ -432,7 +487,7 @@ class DataTypes(QMainWindow):
         #parse the value
         value = literal_eval(value)
         #change the value in the dict
-        set_dict_value(struct_dict, path, value)
+        construct_helper.set_dict_value(struct_dict, path, value)
         #try to rebuild the struct, this might throw exception that will be displayed in message box
         parsed_struct = Container(struct_dict)
         data = self.main_struct.build(parsed_struct)
@@ -440,5 +495,84 @@ class DataTypes(QMainWindow):
         self.parsed_struct = parsed_struct
         #change also in lstConstruct
         self._dump_container_to_list(self.parsed_struct)
+        #and the hexEdit
+        self.set_hexEdit_bytes(data)
+
+    @Slot()
+    @exception_handler
+    def on_btnLoad010Template_clicked(self):
+        #display openDialogBox
+        default_dir = self.settings.value("default_dir", '')
+        file_filter = "010 Template (*.bt)"
+        (file_name, mask) = QFileDialog.getOpenFileName(self,
+                                                        "Choose 010 template",
+                                                        default_dir,
+                                                        file_filter)
+        self.ui.label_010_template_filename.setText(file_name + ' - loading..')
+        #parse 010 template
+        self.template_path = file_name
+        self.ui.label_010_template_filename.setText(file_name + ' - loading succeeded!')
+        self.update()
+
+    @Slot()
+    @exception_handler
+    def on_btnApply010Template_clicked(self):
+        data = self.parsed_template._pfp__build()
+        self.set_hexEdit_bytes(data)
+        #apply change
+        self.on_changeButton_clicked()
+
+    @Slot()
+    @exception_handler
+    def on_lst010Template_itemSelectionChanged(self):
+        #get the offset from the struct
+        current_item = self.ui.lst010Template.currentItem()
+        item_tooltip = current_item.toolTip()
+        if item_tooltip:
+            path = item_tooltip.split('.')[1:]
+            offset = _010_template_helper.get_offset_of(self.parsed_template, path)
+            size = _010_template_helper.get_size_of(self.parsed_template, path)
+            #highlight in the hexeditor
+            cursor = self.view.get_cursor_position()
+            self.view.set_selection(cursor + offset, cursor + offset + size)
+
+    @Slot()
+    @exception_handler
+    def on_lst010Template_itemActivated(self):
+        '''
+        This event happens when the user double click on item in the list or press Enter
+        '''
+        #get field value
+        current_item = self.ui.lst010Template.currentItem()
+        item_tooltip = current_item.toolTip()
+        field_name = item_tooltip
+        path = field_name.split('.')[1:]
+        field_value = _010_template_helper.get_from_template(self.parsed_template, path)._pfp__value
+        field_size = _010_template_helper.get_size_of(self.parsed_template, path)
+        #field type is actually string or int/long
+        if type(field_value) is str:
+            #display as a string
+            field_value = repr(field_value)
+        elif type(field_value) in (int,long):
+            field_value = '0x%x' % (field_value,)
+        else:
+            raise Exception('Unknown field type for %s' % (path,))
+
+        #open dialog box
+        value,is_confirmed = QInputDialog.getText(self,
+                'Change value',
+                'Enter new integer value for %s (%d bytes)' % (field_name, field_size),
+                text=field_value)
+        if not is_confirmed:
+            return
+
+        #parse the value
+        value = literal_eval(value)
+        #change the value in the dict
+        _010_template_helper.set_template_value(self.parsed_template, path, value)
+        #try to rebuild the struct, this might throw exception that will be displayed in message box
+        data = self.parsed_template._pfp__build()
+        #change also in lst010Template
+        self._dump_parsed_010_object_to_list(self.parsed_template)
         #and the hexEdit
         self.set_hexEdit_bytes(data)

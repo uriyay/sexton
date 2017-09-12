@@ -196,6 +196,44 @@
        </item>
       </layout>
      </widget>
+     <widget class="QWidget" name="tab_010_templates">
+      <attribute name="title">
+       <string>010 Template</string>
+      </attribute>
+      <layout class="QVBoxLayout" name="verticalLayout">
+       <item>
+        <widget class="QListWidget" name="lst010Template">
+        </widget>
+       </item>
+       <item>
+        <widget class="QCommandLinkButton" name="btnLoad010Template">
+         <property name="enabled">
+          <bool>true</bool>
+         </property>
+         <property name="text">
+          <string>Load 010 template</string>
+         </property>
+         </widget>
+       </item>
+       <item>
+        <widget class="QCommandLinkButton" name="btnApply010Template">
+         <property name="enabled">
+          <bool>true</bool>
+         </property>
+         <property name="text">
+          <string>Apply</string>
+         </property>
+         </widget>
+       </item>
+       <item>
+        <widget class="QLabel" name="label_010_template_filename">
+         <property name="text">
+          <string>No 010 template file selected</string>
+         </property>
+        </widget>
+       </item>
+      </layout>
+     </widget>
      <widget class="QWidget" name="tab_dates">
       <attribute name="title">
        <string>Dates</string>
